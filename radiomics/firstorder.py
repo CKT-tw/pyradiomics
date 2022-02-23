@@ -437,3 +437,19 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
     """
     p_i = self.coefficients['p_i']
     return numpy.nansum(p_i ** 2, 1)
+
+  def get25PercentileFeatureValue(self):
+    r"""
+    **20. 25th percentile**
+
+    The 25\ :sup:`th` percentile of :math:`\textbf{X}`
+    """
+    return numpy.nanpercentile(self.targetVoxelArray, 25, axis=1)
+
+  def get75PercentileFeatureValue(self):
+    r"""
+    **21. 75th percentile**
+
+    The 75\ :sup:`th` percentile of :math:`\textbf{X}`
+    """
+    return numpy.nanpercentile(self.targetVoxelArray, 75, axis=1)
