@@ -96,6 +96,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     matrix_args = [
       self.imageArray,
       self.maskArray,
+      numpy.array(self.settings.get('distances', [1])),
       Ng,
       Nr,
       self.settings.get('force2D', False),

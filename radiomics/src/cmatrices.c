@@ -1,5 +1,11 @@
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+
 #include <stdlib.h>
 #include "cmatrices.h"
+#include <math.h>
+#include <Python.h>
+#include <numpy/arrayobject.h>
+
 
 int calculate_glcm(int *image, char *mask, int *size, int *bb, int *strides, int *angles, int Na, int Nd, double *glcm, int Ng)
 {
@@ -753,7 +759,7 @@ int calculate_gldm(int *image, char *mask, int *size, int *bb, int *strides, int
   return 1;
 }
 
-int get_angle_count(int *size, int *distances, int Nd, int Ndist, char bidirectional, int force2Ddim)
+int get_angle_count(int *size, float *distances_float, int Nd, int Ndist, char bidirectional, int force2Ddim)
 {
   /* Calculate the number of angles that need to be generated for the requested distances, taking into account the size
    * of the image and whether a dimension has been excluded (=force2Ddim).
@@ -765,6 +771,12 @@ int get_angle_count(int *size, int *distances, int Nd, int Ndist, char bidirecti
   int Na;  // Grand total of angles to generate
   int Na_d, Na_dd;  // Angles per distance Na_d = N angles for distance [0, n] and Na_dd = N angles for distance [0, n -1]
   int dist_idx, dim_idx;
+
+  // Convert any direction distance into side length distance ex. largest distance in 1*1*1 cude is 1.732 
+  int len_distances_float = sizeof(distances_float)/sizeof(float);
+  int *distances = (int *)malloc(len_distances_float * sizeof(int));
+  for (int i=0; i<len_distances_float; i++)
+    distances[i] = (int)ceil(distances_float[i]/1.732); 
 
   Na = 0;
   for (dist_idx = 0; dist_idx < Ndist; dist_idx++)
@@ -801,11 +813,13 @@ int get_angle_count(int *size, int *distances, int Nd, int Ndist, char bidirecti
   // (if bidirectional, Na will be even, and angles is a mirrored array)
   if (!bidirectional) Na /= 2;
 
+  free(distances);
   return Na;
 }
 
-int build_angles(int *size, int *distances, int Nd, int Ndist, int force2Ddim, int Na, int *angles)
+int build_angles(int *size, float *distances_float, int Nd, int Ndist, int force2Ddim, int *Na, int *angles)
 {
+  import_array();
   /* Generate the angles. One index, new_a_idx controls the combination of offsets, and is always increased.
    * Each new generated angle is checked if it is valid (i.e. at least 1 dimension non-zero, no offset larger than
    * the size and, if specified, only 0 offset in the force2Ddim). During generation, the offsets for the angle are
@@ -820,6 +834,16 @@ int build_angles(int *size, int *distances, int Nd, int Ndist, int force2Ddim, i
   int *offset_stride;
   int max_distance, n_offsets, offset, a_dist;
   int dist_idx, dim_idx, a_idx, new_a_idx;
+
+  // Convert any direction distance into side length distance ex. largest distance in 1*1*1 cude is 1.732 
+  int *distances = (int *)malloc(Ndist * sizeof(int));
+  float max_distance_float = 0.0;
+  for (int i=0; i<Ndist; i++)
+  {
+    if (distances_float[i]>max_distance_float)
+      max_distance_float = distances_float[i];
+    distances[i] = (int)ceil(distances_float[i]/1.732); 
+  }
 
   max_distance = 0;  // Maximum offset specified, needed later on to generate the range of offsets
   for (dist_idx = 0; dist_idx < Ndist; dist_idx++)
@@ -851,7 +875,7 @@ int build_angles(int *size, int *distances, int Nd, int Ndist, int force2Ddim, i
 
   new_a_idx = 0;  // index used to generate new angle offset, increases during every loop
   a_idx = 0;  // index in angles array of current angle being generated, increases only when a valid angle has been generated
-  while (a_idx < Na)
+  while (a_idx < *Na)
   {
     a_dist = 0;  // maximum offset of the angle, corresponds to the distance this angle belongs to (infinity norm)
     // generate new angle
@@ -887,6 +911,43 @@ int build_angles(int *size, int *distances, int Nd, int Ndist, int force2Ddim, i
     }
   }
 
+  int ctr = 0;
+  float a_distance;
+  npy_intp dims[2];
+  dims[0] = *Na;
+  dims[1] = Nd;
+  
+  PyArrayObject *angles_arr = (PyArrayObject *)PyArray_SimpleNew(2, dims, NPY_INT);
+  if (!(angles_arr))
+  {
+    free(distances);
+    free(offset_stride);
+    PyErr_NoMemory();
+    return -1;
+  }
+  int *angles_temp = (int *)PyArray_DATA(angles_arr);
+  double positionSquareSum;
+  for (a_idx = 0; a_idx < *Na; a_idx++)
+  {
+    positionSquareSum = 0.0;
+    for (dim_idx = 0; dim_idx < Nd; dim_idx++)
+        positionSquareSum += pow(angles[a_idx * Nd + dim_idx], 2);
+    a_distance = (float)sqrt(positionSquareSum);
+
+    if (a_distance < max_distance_float)
+    {
+      for (dim_idx = 0; dim_idx < Nd; dim_idx++)
+        angles_temp[ctr * Nd + dim_idx] = angles[a_idx * Nd + dim_idx];
+      ctr++;
+    }
+  }
+  for (int i = 0; i < *Na; i++)
+      for (int j = 0; j < Nd; j++)
+        angles[i * Nd + j] = angles_temp[i * Nd + j];
+  *Na = ctr; 
+
+  free(distances);
   free(offset_stride);
+
   return 0;
 }

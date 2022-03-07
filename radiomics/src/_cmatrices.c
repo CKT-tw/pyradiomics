@@ -255,7 +255,7 @@ static PyObject *cmatrices_calculate_glcm(PyObject *self, PyObject *args)
 static PyObject *cmatrices_calculate_glszm(PyObject *self, PyObject *args)
 {
   int Ng, Ns, force2D, force2Ddimension, kernelRadius;
-  PyObject *image_obj, *mask_obj, *voxels_obj;
+  PyObject *image_obj, *mask_obj, *distances_obj, *voxels_obj;
   PyArrayObject *image_arr, *mask_arr, *voxels_arr;
   int Na, Nd, Nvox, Nkernel;
   int *size, *bb, *strides;
@@ -277,7 +277,7 @@ static PyObject *cmatrices_calculate_glszm(PyObject *self, PyObject *args)
   voxels = NULL;
 
   // Parse the input tuple
-  if (!PyArg_ParseTuple(args, "OOiiii|iO", &image_obj, &mask_obj, &Ng, &Ns, &force2D, &force2Ddimension, &kernelRadius, &voxels_obj))
+  if (!PyArg_ParseTuple(args, "OOOiiii|iO", &image_obj, &mask_obj, &distances_obj, &Ng, &Ns, &force2D, &force2Ddimension, &kernelRadius, &voxels_obj))
     return NULL;
 
   // Check if array input is valid and extract sizes and strides of image and mask
@@ -301,7 +301,7 @@ static PyObject *cmatrices_calculate_glszm(PyObject *self, PyObject *args)
   // If extraction is not forced 2D, ensure the dimension is set to a non-existent one (ensuring 3D angles when possible)
   if(!force2D) force2Ddimension = -1;
 
-  if(build_angles_arr(NULL, &angles_arr, size, Nd, force2Ddimension, 1, &Na) < 0)
+  if(build_angles_arr(distances_obj, &angles_arr, size, Nd, force2Ddimension, 1, &Na) < 0)
   {
     Py_XDECREF(image_arr);
     Py_XDECREF(mask_arr);
@@ -452,7 +452,7 @@ static PyObject *cmatrices_calculate_glszm(PyObject *self, PyObject *args)
 static PyObject *cmatrices_calculate_glrlm(PyObject *self, PyObject *args)
 {
   int Ng, Nr, force2D, force2Ddimension, kernelRadius;
-  PyObject *image_obj, *mask_obj, *voxels_obj;
+  PyObject *image_obj, *mask_obj, *distances_obj, *voxels_obj;
   PyArrayObject *image_arr, *mask_arr, *voxels_arr;
   int Nd, Na, Nvox;
   int *size, *bb, *strides;
@@ -472,7 +472,7 @@ static PyObject *cmatrices_calculate_glrlm(PyObject *self, PyObject *args)
   voxels = NULL;
 
   // Parse the input tuple
-  if (!PyArg_ParseTuple(args, "OOiiii|iO", &image_obj, &mask_obj, &Ng, &Nr, &force2D, &force2Ddimension, &kernelRadius, &voxels_obj))
+  if (!PyArg_ParseTuple(args, "OOOiiii|iO", &image_obj, &mask_obj, &distances_obj, &Ng, &Nr, &force2D, &force2Ddimension, &kernelRadius, &voxels_obj))
     return NULL;
 
   // Check if array input is valid and extract sizes and strides of image and mask
@@ -496,7 +496,7 @@ static PyObject *cmatrices_calculate_glrlm(PyObject *self, PyObject *args)
   // If extraction is not forced 2D, ensure the dimension is set to a non-existent one (ensuring 3D angles when possible)
   if(!force2D) force2Ddimension = -1;
 
-  if(build_angles_arr(NULL, &angles_arr, size, Nd, force2Ddimension, 0, &Na) < 0)
+  if(build_angles_arr(distances_obj, &angles_arr, size, Nd, force2Ddimension, 0, &Na) < 0)
   {
     Py_XDECREF(image_arr);
     Py_XDECREF(mask_arr);
@@ -961,14 +961,15 @@ static PyObject *cmatrices_generate_angles(PyObject *self, PyObject *args)
 int build_angles_arr(PyObject *distances_obj, PyArrayObject **angles_arr, int *size, int Nd, int force2Ddimension, int bidirectional, int *Na)
 {
   PyArrayObject *distances_arr;
-  int *distances, *angles;
+  float *distances;
+  int *angles;
   int Ndist;
   npy_intp dims[2];
 
   if (distances_obj)
   {
     // Interpret the distance object as numpy array
-    distances_arr = (PyArrayObject *)PyArray_FROM_OTF(distances_obj, NPY_INT, NPY_ARRAY_FORCECAST | NPY_ARRAY_IN_ARRAY);
+    distances_arr = (PyArrayObject *)PyArray_FROM_OTF(distances_obj, NPY_FLOAT, NPY_ARRAY_FORCECAST | NPY_ARRAY_IN_ARRAY);
 
     if (!distances_arr)
     {
@@ -986,18 +987,18 @@ int build_angles_arr(PyObject *distances_obj, PyArrayObject **angles_arr, int *s
 
     // Get the number of distances and the distances array data
     Ndist = (int)PyArray_DIM(distances_arr, 0);
-    distances = (int *)PyArray_DATA(distances_arr);
+    distances = (float *)PyArray_DATA(distances_arr);
   }
   else
   {
     Ndist = 1;
-    distances = (int *)malloc(sizeof *distances);
+    distances = (float *)malloc(sizeof *distances);
     if (!distances)
     {
       PyErr_NoMemory();
       return -1;
     }
-    distances[0] = 1;
+    distances[0] = 1.0;
   }
 
   // Generate the angles needed for texture matrix calculation
@@ -1030,7 +1031,7 @@ int build_angles_arr(PyObject *distances_obj, PyArrayObject **angles_arr, int *s
   }
   angles = (int *)PyArray_DATA(*angles_arr);
 
-  if(build_angles(size, distances, Nd, Ndist, force2Ddimension, *Na, angles) > 0)
+  if(build_angles(size, distances, Nd, Ndist, force2Ddimension, Na, angles) > 0)
   {
     if (distances_obj)
       Py_XDECREF(distances_arr);
@@ -1042,6 +1043,30 @@ int build_angles_arr(PyObject *distances_obj, PyArrayObject **angles_arr, int *s
     PyErr_SetString(PyExc_RuntimeError, "Error building angles.");
     return -1;
   }
+
+  // Re-wrap angles with distance restriction in a numpy array 
+  dims[0] = *Na;
+  dims[1] = Nd;
+
+  PyArrayObject *angles_arr_restricted = (PyArrayObject *)PyArray_SimpleNew(2, dims, NPY_INT);
+  if (!(angles_arr_restricted))
+  {
+    if (distances_obj)
+      Py_XDECREF(distances_arr);
+    else
+      free(distances);
+
+    PyErr_NoMemory();
+    return -1;
+  }
+
+  int *angles_restricted = (int *)PyArray_DATA(angles_arr_restricted);
+  for (int i = 0; i < *Na; i++)
+      for (int j = 0; j < Nd; j++)
+        angles_restricted[i * Nd + j] = angles[i * Nd + j];
+
+  angles = angles_restricted;
+  *angles_arr = angles_arr_restricted;
 
   // Clean up distances array
   if (distances_obj)
