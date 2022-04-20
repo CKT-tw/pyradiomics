@@ -966,7 +966,8 @@ int build_angles_arr(PyObject *distances_obj, PyArrayObject **angles_arr, int *s
   int Ndist;
   npy_intp dims[2];
 
-  if (distances_obj)
+  // Set distance control 
+  if (distances_obj)  // User defined distance
   {
     // Interpret the distance object as numpy array
     distances_arr = (PyArrayObject *)PyArray_FROM_OTF(distances_obj, NPY_FLOAT, NPY_ARRAY_FORCECAST | NPY_ARRAY_IN_ARRAY);
@@ -989,7 +990,7 @@ int build_angles_arr(PyObject *distances_obj, PyArrayObject **angles_arr, int *s
     Ndist = (int)PyArray_DIM(distances_arr, 0);
     distances = (float *)PyArray_DATA(distances_arr);
   }
-  else
+  else  // Default distance = 1.0
   {
     Ndist = 1;
     distances = (float *)malloc(sizeof *distances);
