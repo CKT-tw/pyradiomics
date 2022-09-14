@@ -76,9 +76,19 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     super(RadiomicsGLRLM, self).__init__(inputImage, inputMask, **kwargs)
 
     self.weightingNorm = kwargs.get('weightingNorm', None)  # manhattan, euclidean, infinity
+    self.evaluation_method = kwargs.get('evaluation', 'Mean')
 
     self.P_glrlm = None
     self.imageArray = self._applyBinning(self.imageArray)
+
+  def direction_evaluation(self, input_arr, axis):
+    if self.evaluation_method=='Mean':
+      return numpy.nanmean(input_arr, axis)
+    elif self.evaluation_method=='Max':
+      return numpy.nanmax(input_arr, axis)
+    else:
+      print("Unknown evaluation method, valid options are 'Mean'/'Max.'")
+      raise Exception
 
   def _initCalculation(self, voxelCoordinates=None):
     self.P_glrlm = self._calculateMatrix(voxelCoordinates)
@@ -189,7 +199,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     Nr = self.coefficients['Nr']
 
     sre = numpy.sum((pr / (jvector[None, :, None] ** 2)), 1) / Nr
-    return numpy.nanmean(sre, 1)
+    return self.direction_evaluation(sre, 1)
 
   def getLongRunEmphasisFeatureValue(self):
     r"""
@@ -206,7 +216,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     Nr = self.coefficients['Nr']
 
     lre = numpy.sum((pr * (jvector[None, :, None] ** 2)), 1) / Nr
-    return numpy.nanmean(lre, 1)
+    return self.direction_evaluation(lre, 1)
 
   def getGrayLevelNonUniformityFeatureValue(self):
     r"""
@@ -222,7 +232,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     Nr = self.coefficients['Nr']
 
     gln = numpy.sum((pg ** 2), 1) / Nr
-    return numpy.nanmean(gln, 1)
+    return self.direction_evaluation(gln, 1)
 
   def getGrayLevelNonUniformityNormalizedFeatureValue(self):
     r"""
@@ -238,7 +248,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     Nr = self.coefficients['Nr']
 
     glnn = numpy.sum(pg ** 2, 1) / (Nr ** 2)
-    return numpy.nanmean(glnn, 1)
+    return self.direction_evaluation(glnn, 1)
 
   def getRunLengthNonUniformityFeatureValue(self):
     r"""
@@ -254,7 +264,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     Nr = self.coefficients['Nr']
 
     rln = numpy.sum((pr ** 2), 1) / Nr
-    return numpy.nanmean(rln, 1)
+    return self.direction_evaluation(rln, 1)
 
   def getRunLengthNonUniformityNormalizedFeatureValue(self):
     r"""
@@ -270,7 +280,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     Nr = self.coefficients['Nr']
 
     rlnn = numpy.sum((pr ** 2), 1) / Nr ** 2
-    return numpy.nanmean(rlnn, 1)
+    return self.direction_evaluation(rlnn, 1)
 
   def getRunPercentageFeatureValue(self):
     r"""
@@ -295,7 +305,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     Np = numpy.sum(pr * jvector[None, :, None], 1)  # shape (Nvox, Na)
 
     rp = Nr / Np
-    return numpy.nanmean(rp, 1)
+    return self.direction_evaluation(rp, 1)
 
   def getGrayLevelVarianceFeatureValue(self):
     r"""
@@ -314,7 +324,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
 
     u_i = numpy.sum(pg * ivector[None, :, None], 1, keepdims=True)
     glv = numpy.sum(pg * (ivector[None, :, None] - u_i) ** 2, 1)
-    return numpy.nanmean(glv, 1)
+    return self.direction_evaluation(glv, 1)
 
   def getRunVarianceFeatureValue(self):
     r"""
@@ -333,7 +343,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
 
     u_j = numpy.sum(pr * jvector[None, :, None], 1, keepdims=True)
     rv = numpy.sum(pr * (jvector[None, :, None] - u_j) ** 2, 1)
-    return numpy.nanmean(rv, 1)
+    return self.direction_evaluation(rv, 1)
 
   def getRunEntropyFeatureValue(self):
     r"""
@@ -353,7 +363,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     p_glrlm = self.P_glrlm / Nr[:, None, None, :]  # divide by Nr to get the normalized matrix
 
     re = -numpy.sum(p_glrlm * numpy.log2(p_glrlm + eps), (1, 2))
-    return numpy.nanmean(re, 1)
+    return self.direction_evaluation(re, 1)
 
   def getLowGrayLevelRunEmphasisFeatureValue(self):
     r"""
@@ -370,7 +380,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     Nr = self.coefficients['Nr']
 
     lglre = numpy.sum((pg / (ivector[None, :, None] ** 2)), 1) / Nr
-    return numpy.nanmean(lglre, 1)
+    return self.direction_evaluation(lglre, 1)
 
   def getHighGrayLevelRunEmphasisFeatureValue(self):
     r"""
@@ -387,7 +397,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     Nr = self.coefficients['Nr']
 
     hglre = numpy.sum((pg * (ivector[None, :, None] ** 2)), 1) / Nr
-    return numpy.nanmean(hglre, 1)
+    return self.direction_evaluation(hglre, 1)
 
   def getShortRunLowGrayLevelEmphasisFeatureValue(self):
     r"""
@@ -404,7 +414,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
 
     srlgle = numpy.sum((self.P_glrlm / ((ivector[None, :, None, None] ** 2) * (jvector[None, None, :, None] ** 2))),
                        (1, 2)) / Nr
-    return numpy.nanmean(srlgle, 1)
+    return self.direction_evaluation(srlgle, 1)
 
   def getShortRunHighGrayLevelEmphasisFeatureValue(self):
     r"""
@@ -421,7 +431,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
 
     srhgle = numpy.sum((self.P_glrlm * (ivector[None, :, None, None] ** 2) / (jvector[None, None, :, None] ** 2)),
                        (1, 2)) / Nr
-    return numpy.nanmean(srhgle, 1)
+    return self.direction_evaluation(srhgle, 1)
 
   def getLongRunLowGrayLevelEmphasisFeatureValue(self):
     r"""
@@ -438,7 +448,7 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
 
     lrlgle = numpy.sum((self.P_glrlm * (jvector[None, None, :, None] ** 2) / (ivector[None, :, None, None] ** 2)),
                        (1, 2)) / Nr
-    return numpy.nanmean(lrlgle, 1)
+    return self.direction_evaluation(lrlgle, 1)
 
   def getLongRunHighGrayLevelEmphasisFeatureValue(self):
     r"""
@@ -455,4 +465,4 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
 
     lrhgle = numpy.sum((self.P_glrlm * ((jvector[None, None, :, None] ** 2) * (ivector[None, :, None, None] ** 2))),
                        (1, 2)) / Nr
-    return numpy.nanmean(lrhgle, 1)
+    return self.direction_evaluation(lrhgle, 1)
