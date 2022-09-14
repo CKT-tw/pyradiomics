@@ -453,3 +453,13 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
     The 75\ :sup:`th` percentile of :math:`\textbf{X}`
     """
     return numpy.nanpercentile(self.targetVoxelArray, 75, axis=1)
+
+  def getEnergy2FeatureValue(self):
+    r"""
+    **22. Energy2**
+    Another energy definition
+    Energy2 = ∑ ((p_i)^2)
+    """
+    p_i = self.coefficients['p_i']
+
+    return  numpy.sum(p_i ** 2, 1)
