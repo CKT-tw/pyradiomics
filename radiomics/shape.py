@@ -1,5 +1,6 @@
 import numpy
 import SimpleITK as sitk
+from scipy.ndimage import convolve
 
 from radiomics import base, cShape, deprecated
 
@@ -396,3 +397,19 @@ class RadiomicsShape(base.RadiomicsFeaturesBase):
       self.logger.warning('Elongation eigenvalue negative! (%g, %g)', self.eigenValues[0], self.eigenValues[2])
       return numpy.nan
     return numpy.sqrt(self.eigenValues[0] / self.eigenValues[2])
+
+  def getIrregularityFeatureValue(self):
+    mask = numpy.ones(self.maskArray.shape, numpy.uint8) * self.maskArray # Convert boolean mask to 0-1 mask
+    kernel_6c = numpy.array([[[0, 0, 0], 
+                              [0, 1, 0], 
+                              [0, 0, 0]],
+                             [[0, 1, 0], 
+                              [1, 0, 1], 
+                              [0, 1, 0]],
+                             [[0, 0, 0], 
+                              [0, 1, 0], 
+                              [0, 0, 0]]])
+
+    surronding_count = convolve(mask, kernel_6c)
+    surronding_count = surronding_count * mask # Remove convolve reuslts out of mask
+    return numpy.sum(surronding_count) / numpy.sum([numpy.count_nonzero(surronding_count==i) for i in range(1, 7, 1)])
