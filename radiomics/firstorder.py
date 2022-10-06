@@ -1,5 +1,8 @@
 import numpy
+import statistics
 from six.moves import range
+from scipy.ndimage import sobel, convolve
+from scipy.stats import gmean, trim_mean
 
 from radiomics import base, cMatrices, deprecated
 
@@ -70,8 +73,27 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
 
   def _initCalculation(self, voxelCoordinates=None):
 
+    matlab_sobel_kernel = [[[1, 3, 1], 
+                            [3, 6, 3], 
+                            [1, 3, 1]],
+                           [[0, 0, 0], 
+                            [0, 0, 0], 
+                            [0, 0, 0]],
+                           [[-1, -3, -1], 
+                            [-3, -6, -3], 
+                            [-1, -3, -1]]]
+    dx = convolve(self.imageArray, numpy.transpose(matlab_sobel_kernel, axes=[1, 0, 2]), mode='nearest')
+    dy = convolve(self.imageArray, matlab_sobel_kernel, mode='nearest')
+    dz = convolve(self.imageArray, numpy.transpose(matlab_sobel_kernel, axes=[2, 1, 0]), mode='nearest')
+
+    # dx = sobel(self.imageArray, 0, mode='nearest')  # x derivative
+    # dy = sobel(self.imageArray, 1, mode='nearest')  # y derivative
+    # dz = sobel(self.imageArray, 2, mode='nearest')  # z derivative
+    self.gradientImageArray = numpy.sqrt(numpy.power(dx, 2) + numpy.power(dy, 2) + numpy.power(dz, 2)) / 44
+
     if voxelCoordinates is None:
       self.targetVoxelArray = self.imageArray[self.maskArray].astype('float').reshape((1, -1))
+      self.targetGradientVoxelArray = self.gradientImageArray[self.maskArray].astype('float').reshape((1, -1))
       _, p_i = numpy.unique(self.discretizedImageArray[self.maskArray], return_counts=True)
       p_i = p_i.reshape((1, -1))
     else:
@@ -81,6 +103,7 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
       kernelCoords = tuple(kernelCoords)  # shape (Nd, (Nvox, Nk))
 
       self.targetVoxelArray = self.imageArray[kernelCoords]  # shape (Nvox, Nk)
+      self.targetGradientVoxelArray = self.gradientImageArray[kernelCoords]
 
       p_i = numpy.empty((voxelCoordinates.shape[1], len(self.coefficients['grayLevels'])))  # shape (Nvox, Ng)
       for gl_idx, gl in enumerate(self.coefficients['grayLevels']):
@@ -446,9 +469,17 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
     """
     return numpy.nanpercentile(self.targetVoxelArray, 25, axis=1)
 
+  def get50PercentileFeatureValue(self):
+    r"""
+    **21. 50th percentile**
+
+    The 50\ :sup:`th` percentile of :math:`\textbf{X}`
+    """
+    return numpy.nanpercentile(self.targetVoxelArray, 50, axis=1)
+
   def get75PercentileFeatureValue(self):
     r"""
-    **21. 75th percentile**
+    **22. 75th percentile**
 
     The 75\ :sup:`th` percentile of :math:`\textbf{X}`
     """
@@ -456,10 +487,83 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
 
   def getEnergy2FeatureValue(self):
     r"""
-    **22. Energy2**
+    **23. Energy2**
     Another energy definition
     Energy2 = ∑ ((p_i)^2)
     """
     p_i = self.coefficients['p_i']
 
     return  numpy.sum(p_i ** 2, 1)
+
+  def getModeSUVFeatureValue(self):
+    return numpy.array([statistics.mode(numpy.round(self.targetVoxelArray.flatten(), 1))])
+
+  def getGeomeanSUVFeatureValue(self):
+    return gmean(self.targetVoxelArray, axis=1)
+
+  def getHarmmeanSUVFeatureValue(self):
+    return numpy.array([statistics.harmonic_mean(self.targetVoxelArray.flatten())])
+
+  def getTrimmeanSUVFeatureValue(self):
+    return trim_mean(self.targetVoxelArray, 0.05, axis=1)
+
+  # def getIrregularityFeatureValue(self):
+  #   pass
+
+  def getMeanGradientFeatureValue(self):
+    return numpy.nanmean(self.targetGradientVoxelArray, 1)
+
+  def getMedianGradientFeatureValue(self):
+    return numpy.nanmedian(self.targetGradientVoxelArray, 1)
+
+  def getModeGradientFeatureValue(self):
+    return numpy.array([statistics.mode(numpy.round(self.targetGradientVoxelArray.flatten(), 1))])
+
+  def getGeomeanGradientFeatureValue(self):
+    return gmean(self.targetGradientVoxelArray, axis=1)
+
+  def getHarmmeanGradientFeatureValue(self):
+    return numpy.array([statistics.harmonic_mean(self.targetGradientVoxelArray.flatten())])
+
+  def getTrimmeanGradientFeatureValue(self):
+    return trim_mean(self.targetGradientVoxelArray, 0.05, axis=1)
+
+  def getStddevGradientFeatureValue(self):
+    return numpy.nanstd(self.targetGradientVoxelArray, axis=1)
+
+  def getSkewnessGradientFeatureValue(self):
+    m2 = self._moment(self.targetGradientVoxelArray, 2)
+    m3 = self._moment(self.targetGradientVoxelArray, 3)
+
+    m2[m2 == 0] = 1  # Flat Region, prevent division by 0 errors
+    m3[m2 == 0] = 0  # ensure Flat Regions are returned as 0
+
+    return m3 / m2 ** 1.5
+
+  def getKurtosisGradientFeatureValue(self):
+    m2 = self._moment(self.targetGradientVoxelArray, 2)
+    m4 = self._moment(self.targetGradientVoxelArray, 4)
+
+    m2[m2 == 0] = 1  # Flat Region, prevent division by 0 errors
+    m4[m2 == 0] = 0  # ensure Flat Regions are returned as 0
+
+    return m4 / m2 ** 2.0
+
+  def getPrctile10GradientFeatureValue(self):
+    return numpy.nanpercentile(self.targetGradientVoxelArray, 10, axis=1)
+
+  def getPrctile25GradientFeatureValue(self):
+    return numpy.nanpercentile(self.targetGradientVoxelArray, 25, axis=1)
+
+  def getPrctile50GradientFeatureValue(self):
+    return numpy.nanpercentile(self.targetGradientVoxelArray, 50, axis=1)
+
+  def getPrctile75GradientFeatureValue(self):
+    return numpy.nanpercentile(self.targetGradientVoxelArray, 75, axis=1)
+
+  def getPrctile90GradientFeatureValue(self):
+    return numpy.nanpercentile(self.targetGradientVoxelArray, 90, axis=1)
+
+
+
+  
