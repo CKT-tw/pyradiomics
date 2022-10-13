@@ -495,6 +495,27 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
 
     return  numpy.sum(p_i ** 2, 1)
 
+  @deprecated
+  def getStandardDeviationN1FeatureValue(self):
+    r"""
+    **24. Standard Deviation N1**
+    .. math::
+      \textit{standard deviation} = \sqrt{\frac{1}{N_p-1}\sum^{N_p}_{i=1}{(\textbf{X}(i)-\bar{X})^2}}
+
+    ddof=1 version.
+    Standard Deviation measures the amount of variation or dispersion from the Mean Value. By definition,
+    :math:`\textit{standard deviation} = \sqrt{\textit{variance}}`
+
+    .. note::
+      As this feature is correlated with variance, it is marked so it is not enabled by default.
+      To include this feature in the extraction, specify it by name in the enabled features
+      (i.e. this feature will not be enabled if no individual features are specified (enabling 'all' features),
+      but will be enabled when individual features are specified, including this feature).
+      Not present in IBSI feature definitions (correlated with variance)
+    """
+
+    return numpy.nanstd(self.targetVoxelArray, axis=1, ddof=1)
+
   def getModeSUVFeatureValue(self):
     return numpy.array([statistics.mode(numpy.round(self.targetVoxelArray.flatten(), 1))])
 
@@ -528,8 +549,8 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
   def getTrimmeanGradientFeatureValue(self):
     return trim_mean(self.targetGradientVoxelArray, 0.05, axis=1)
 
-  def getStddevGradientFeatureValue(self):
-    return numpy.nanstd(self.targetGradientVoxelArray, axis=1)
+  def getStddevN1GradientFeatureValue(self):
+    return numpy.nanstd(self.targetGradientVoxelArray, axis=1, ddof=1)
 
   def getSkewnessGradientFeatureValue(self):
     m2 = self._moment(self.targetGradientVoxelArray, 2)
