@@ -1,6 +1,8 @@
+import logging
+
 import numpy
 
-from radiomics import base, cMatrices
+from radiomics import base, cMatrices, getProgressReporter
 
 
 class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
@@ -183,6 +185,28 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     self.coefficients['pg'] = pg
     self.coefficients['ivector'] = ivector
     self.coefficients['jvector'] = jvector
+
+  def _calculateMatrixNonSimplified(self, voxelCoordinates=None):
+    self.logger.debug('Calculating non-simplified GLRLM matrix in C')
+
+    Ng = self.coefficients['Ng']
+    Nr = numpy.max(self.imageArray.shape)
+
+    matrix_args = [
+      self.imageArray,
+      self.maskArray,
+      numpy.array(self.settings.get('distances', [1])),
+      Ng,
+      Nr,
+      self.settings.get('force2D', False),
+      self.settings.get('force2Ddimension', 0)
+    ]
+    if self.voxelBased:
+      matrix_args += [self.settings.get('kernelRadius', 1), voxelCoordinates]
+
+    P_glrlm, _ = cMatrices.calculate_glrlm(*matrix_args)  # shape (Nvox, Ng, Nr, Na)
+
+    return P_glrlm
 
   def getShortRunEmphasisFeatureValue(self):
     r"""
@@ -466,3 +490,72 @@ class RadiomicsGLRLM(base.RadiomicsFeaturesBase):
     lrhgle = numpy.sum((self.P_glrlm * ((jvector[None, None, :, None] ** 2) * (ivector[None, :, None, None] ** 2))),
                        (1, 2)) / Nr
     return self.direction_evaluation(lrhgle, 1)
+
+
+class RadiomicsGLRLMfromMatrix(RadiomicsGLRLM):
+  def __init__(self, P_glrlm, **kwargs):
+    # super().__init__(inputImage, inputMask, **kwargs)
+    self.P_glrlm = P_glrlm  # shape (Nvox, Ng, Nr, Na)
+    self.logger = logging.getLogger(self.__module__)
+    self.logger.debug('Initializing feature class')
+
+    self.progressReporter = getProgressReporter
+
+    self.settings = kwargs
+
+    self.label = kwargs.get('label', 1)
+    self.voxelBased = kwargs.get('voxelBased', False)
+
+    self.coefficients = {}
+
+    # all features are disabled by default
+    self.enabledFeatures = {}
+    self.featureValues = {}
+
+    self.featureNames = self.getFeatureNames()
+
+    self.weightingNorm = kwargs.get('weightingNorm', None)  # manhattan, euclidean, infinity
+    self.evaluation_method = kwargs.get('evaluation', 'Mean')
+
+  def _initCalculation(self, voxelCoordinates=None):
+    self._calculateCoefficients()
+
+    self.logger.debug('GLRLM feature class initialized, calculated GLRLM with shape %s', self.P_glrlm.shape)
+
+  def _calculateCoefficients(self):
+    self.logger.debug('Calculating GLRLM coefficients by given matrix')
+
+    # Coefficients in base.py: grayLevels, Ng
+    self.coefficients['grayLevels'] = numpy.where(numpy.sum(self.P_glrlm, axis=(0, 2, 3))!=0)[0] + 1 # Start from grayscale 1, 0 is background
+    self.coefficients['Ng'] = int(numpy.max(self.coefficients['grayLevels']))  # max gray level in the ROI
+
+    Ng = self.coefficients['Ng']
+    # Delete rows that specify gray levels not present in the ROI
+    NgVector = range(1, Ng + 1)  # All possible gray values
+    GrayLevels = self.coefficients['grayLevels']  # Gray values present in ROI
+    emptyGrayLevels = numpy.array(list(set(NgVector) - set(GrayLevels)), dtype=int)  # Gray values NOT present in ROI
+
+    self.P_glrlm = numpy.delete(self.P_glrlm, emptyGrayLevels - 1, 1)
+
+    # Coefficients in _calculateMatrix
+    Nr = numpy.sum(self.P_glrlm, (1, 2))
+    Nr[Nr == 0] = numpy.nan  # set sum to numpy.spacing(1) if sum is 0?
+    self.coefficients['Nr'] = Nr
+
+    # Coefficients in _calculateCoefficients: Nr
+    pr = numpy.sum(self.P_glrlm, 1)  # shape (Nvox, Nr, Na)
+    pg = numpy.sum(self.P_glrlm, 2)  # shape (Nvox, Ng, Na)
+
+    ivector = self.coefficients['grayLevels'].astype(float) # shape (Ng,)
+    jvector = numpy.arange(1, self.P_glrlm.shape[2] + 1, dtype=numpy.float64)  # shape (Nr,)
+
+    # Delete columns that run lengths not present in the ROI
+    emptyRunLenghts = numpy.where(numpy.sum(pr, (0, 2)) == 0)
+    self.P_glrlm = numpy.delete(self.P_glrlm, emptyRunLenghts, 2)
+    jvector = numpy.delete(jvector, emptyRunLenghts)
+    pr = numpy.delete(pr, emptyRunLenghts, 1)
+
+    self.coefficients['pr'] = pr
+    self.coefficients['pg'] = pg
+    self.coefficients['ivector'] = ivector
+    self.coefficients['jvector'] = jvector

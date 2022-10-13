@@ -1,6 +1,8 @@
+import logging
+
 import numpy
 
-from radiomics import base, cMatrices
+from radiomics import base, cMatrices, getProgressReporter
 
 
 class RadiomicsNGTDM(base.RadiomicsFeaturesBase):
@@ -110,6 +112,22 @@ class RadiomicsNGTDM(base.RadiomicsFeaturesBase):
     # Delete empty grey levels
     emptyGrayLevels = numpy.where(numpy.sum(P_ngtdm[:, :, 0], 0) == 0)
     P_ngtdm = numpy.delete(P_ngtdm, emptyGrayLevels, 1)
+
+    return P_ngtdm
+
+  def _calculateMatrixNonSimplified(self, voxelCoordinates=None):
+    matrix_args = [
+      self.imageArray,
+      self.maskArray,
+      numpy.array(self.settings.get('distances', [1])),
+      self.coefficients['Ng'],
+      self.settings.get('force2D', False),
+      self.settings.get('force2Ddimension', 0)
+    ]
+    if self.voxelBased:
+      matrix_args += [self.settings.get('kernelRadius', 1), voxelCoordinates]
+
+    P_ngtdm = cMatrices.calculate_ngtdm(*matrix_args)  # shape (Nvox, Ng, 3)
 
     return P_ngtdm
 
@@ -272,3 +290,58 @@ class RadiomicsNGTDM(base.RadiomicsFeaturesBase):
     strength[sum_s_i == 0] = 0
 
     return strength
+
+
+class RadiomicsNGTDMfromMatrix(RadiomicsNGTDM):
+  def __init__(self, P_ngtdm, **kwargs):
+    # super().__init__(inputImage, inputMask, **kwargs)
+    self.P_ngtdm = P_ngtdm  
+    self.logger = logging.getLogger(self.__module__)
+    self.logger.debug('Initializing feature class')
+
+    self.progressReporter = getProgressReporter
+
+    self.settings = kwargs
+
+    self.label = kwargs.get('label', 1)
+    self.voxelBased = kwargs.get('voxelBased', False)
+
+    self.coefficients = {}
+
+    # all features are disabled by default
+    self.enabledFeatures = {}
+    self.featureValues = {}
+
+    self.featureNames = self.getFeatureNames()
+
+  def _initCalculation(self, voxelCoordinates=None):
+    self._calculateCoefficients()
+
+    self.logger.debug('NGTDM feature class initialized, calculated NGTDM with shape %s', self.P_ngtdm.shape)
+
+  def _calculateCoefficients(self):
+    self.logger.debug('Calculating NGTDM coefficients by given matrix')
+
+    # Coefficients in base.py: grayLevels, Ng
+    self.coefficients['grayLevels'] = numpy.where(numpy.sum(self.P_ngtdm[:, :, 0], 0) != 0)[0] + 1 # Start from grayscale 1, 0 is background
+    self.coefficients['Ng'] = int(numpy.max(self.coefficients['grayLevels']))  # max gray level in the ROI
+
+    # Delete empty grey levels
+    emptyGrayLevels = numpy.where(numpy.sum(self.P_ngtdm[:, :, 0], 0) == 0)
+    self.P_ngtdm = numpy.delete(self.P_ngtdm, emptyGrayLevels, 1)
+
+    # No of voxels that have a valid region, lesser equal to Np
+    Nvp = numpy.sum(self.P_ngtdm[:, :, 0], 1)  # shape (Nvox,)
+    self.coefficients['Nvp'] = Nvp  # shape (Nv,)
+
+    # Normalize P_ngtdm[:, 0] (= n_i) to obtain p_i
+    self.coefficients['p_i'] = self.P_ngtdm[:, :, 0] / Nvp[:, None]
+
+    self.coefficients['s_i'] = self.P_ngtdm[:, :, 1]
+    self.coefficients['ivector'] = self.P_ngtdm[:, :, 2]
+
+    # Ngp = number of graylevels, for which p_i > 0
+    self.coefficients['Ngp'] = numpy.sum(self.P_ngtdm[:, :, 0] > 0, 1)
+
+    p_zero = numpy.where(self.coefficients['p_i'] == 0)
+    self.coefficients['p_zero'] = p_zero

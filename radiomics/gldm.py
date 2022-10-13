@@ -1,6 +1,8 @@
+import logging
+
 import numpy
 
-from radiomics import base, cMatrices, deprecated
+from radiomics import base, cMatrices, deprecated, getProgressReporter
 
 
 class RadiomicsGLDM(base.RadiomicsFeaturesBase):
@@ -125,6 +127,27 @@ class RadiomicsGLDM(base.RadiomicsFeaturesBase):
 
     self.coefficients['ivector'] = self.coefficients['grayLevels'].astype(float)
     self.coefficients['jvector'] = jvector
+
+    return P_gldm
+
+  def _calculateMatrixNonSimplified(self, voxelCoordinates=None):
+    self.logger.debug('Calculating GLDM matrix in C')
+
+    Ng = self.coefficients['Ng']
+
+    matrix_args = [
+      self.imageArray,
+      self.maskArray,
+      numpy.array(self.settings.get('distances', [1])),
+      Ng,
+      self.gldm_a,
+      self.settings.get('force2D', False),
+      self.settings.get('force2Ddimension', 0)
+    ]
+    if self.voxelBased:
+      matrix_args += [self.settings.get('kernelRadius', 1), voxelCoordinates]
+
+    P_gldm = cMatrices.calculate_gldm(*matrix_args)  # shape (Nv, Ng, Nd)
 
     return P_gldm
 
@@ -392,3 +415,72 @@ class RadiomicsGLDM(base.RadiomicsFeaturesBase):
 
     ldhgle = numpy.sum(self.P_gldm * ((jvector[None, None, :] ** 2) * (ivector[None, :, None] ** 2)), (1, 2)) / Nz
     return ldhgle
+
+
+class RadiomicsGLDMfromMatrix(RadiomicsGLDM):
+  def __init__(self, P_gldm, **kwargs):
+    # super().__init__(inputImage, inputMask, **kwargs)
+    self.P_gldm = P_gldm  
+    self.logger = logging.getLogger(self.__module__)
+    self.logger.debug('Initializing feature class')
+
+    self.progressReporter = getProgressReporter
+
+    self.settings = kwargs
+
+    self.label = kwargs.get('label', 1)
+    self.voxelBased = kwargs.get('voxelBased', False)
+
+    self.coefficients = {}
+
+    # all features are disabled by default
+    self.enabledFeatures = {}
+    self.featureValues = {}
+
+    self.featureNames = self.getFeatureNames()
+
+    self.gldm_a = kwargs.get('gldm_a', 0)
+
+  def _initCalculation(self, voxelCoordinates=None):
+    self._calculateCoefficients()
+
+    self.logger.debug('GLDM feature class initialized, calculated GLDM with shape %s', self.P_gldm.shape)
+
+  def _calculateCoefficients(self):
+    self.logger.debug('Calculating GLDM coefficients by given matrix')
+
+    # Coefficients in base.py: grayLevels, Ng
+    self.coefficients['grayLevels'] = numpy.where(numpy.sum(self.P_gldm, (0, 2)) != 0)[0] + 1 # Start from grayscale 1, 0 is background
+    self.coefficients['Ng'] = int(numpy.max(self.coefficients['grayLevels']))  # max gray level in the ROI
+
+    # Delete rows that specify gray levels not present in the ROI
+    Ng = self.coefficients['Ng']
+    NgVector = range(1, Ng + 1)  # All possible gray values
+    GrayLevels = self.coefficients['grayLevels']  # Gray values present in ROI
+    emptyGrayLevels = numpy.array(list(set(NgVector) - set(GrayLevels)), dtype=int)  # Gray values NOT present in ROI
+
+    self.P_gldm = numpy.delete(self.P_gldm, emptyGrayLevels - 1, 1)
+
+    jvector = numpy.arange(1, self.P_gldm.shape[2] + 1, dtype='float64')
+
+    # shape (Nv, Nd)
+    pd = numpy.sum(self.P_gldm, 1)
+    # shape (Nv, Ng)
+    pg = numpy.sum(self.P_gldm, 2)
+
+    # Delete columns that dependence sizes not present in the ROI
+    empty_sizes = numpy.sum(pd, 0)
+    self.P_gldm = numpy.delete(self.P_gldm, numpy.where(empty_sizes == 0), 2)
+    jvector = numpy.delete(jvector, numpy.where(empty_sizes == 0))
+    pd = numpy.delete(pd, numpy.where(empty_sizes == 0), 1)
+
+    Nz = numpy.sum(pd, 1)  # Nz per kernel, shape (Nv, )
+    Nz[Nz == 0] = 1  # set sum to numpy.spacing(1) if sum is 0?
+
+    self.coefficients['Nz'] = Nz
+
+    self.coefficients['pd'] = pd
+    self.coefficients['pg'] = pg
+
+    self.coefficients['ivector'] = self.coefficients['grayLevels'].astype(float)
+    self.coefficients['jvector'] = jvector

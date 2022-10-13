@@ -1,7 +1,9 @@
+import logging
+
 import numpy
 from six.moves import range
 
-from radiomics import base, cMatrices
+from radiomics import base, cMatrices, getProgressReporter
 
 
 class RadiomicsGLSZM(base.RadiomicsFeaturesBase):
@@ -99,6 +101,33 @@ class RadiomicsGLSZM(base.RadiomicsFeaturesBase):
     emptyGrayLevels = numpy.array(list(set(NgVector) - set(GrayLevels)), dtype=int)  # Gray values NOT present in ROI
 
     P_glszm = numpy.delete(P_glszm, emptyGrayLevels - 1, 1)
+
+    return P_glszm
+
+  def _calculateMatrixNonSimplified(self, voxelCoordinates=None):
+    """
+    Number of times a region with a
+    gray level and voxel count occurs in an image. P_glszm[level, voxel_count] = # occurrences
+
+    For 3D-images this concerns a 26-connected region, for 2D an 8-connected region
+    """
+    self.logger.debug('Calculating GLSZM matrix in C')
+    Ng = self.coefficients['Ng']
+    Ns = numpy.sum(self.maskArray)
+
+    matrix_args = [
+      self.imageArray,
+      self.maskArray,
+      numpy.array(self.settings.get('distances', [1])),
+      Ng,
+      Ns,
+      self.settings.get('force2D', False),
+      self.settings.get('force2Ddimension', 0)
+    ]
+    if self.voxelBased:
+      matrix_args += [self.settings.get('kernelRadius', 1), voxelCoordinates]
+
+    P_glszm = cMatrices.calculate_glszm(*matrix_args)  # shape (Nvox, Ng, Ns)
 
     return P_glszm
 
@@ -406,3 +435,75 @@ class RadiomicsGLSZM(base.RadiomicsFeaturesBase):
 
     hilae = numpy.sum(self.P_glszm * (ivector[None, :, None] ** 2) * (jvector[None, None, :] ** 2), (1, 2)) / Nz
     return hilae
+
+
+class RadiomicsGLSZMfromMatrix(RadiomicsGLSZM):
+  def __init__(self, P_glszm, **kwargs):
+    # super().__init__(inputImage, inputMask, **kwargs)
+    self.P_glszm = P_glszm  
+    self.logger = logging.getLogger(self.__module__)
+    self.logger.debug('Initializing feature class')
+
+    self.progressReporter = getProgressReporter
+
+    self.settings = kwargs
+
+    self.label = kwargs.get('label', 1)
+    self.voxelBased = kwargs.get('voxelBased', False)
+
+    self.coefficients = {}
+
+    # all features are disabled by default
+    self.enabledFeatures = {}
+    self.featureValues = {}
+
+    self.featureNames = self.getFeatureNames()
+
+  def _initCalculation(self, voxelCoordinates=None):
+    self._calculateCoefficients()
+
+    self.logger.debug('GLSZM feature class initialized, calculated GLSZM with shape %s', self.P_glszm.shape)
+
+  def _calculateCoefficients(self):
+    self.logger.debug('Calculating GLSZM coefficients by given matrix')
+
+    # Coefficients in base.py: grayLevels, Ng
+    self.coefficients['grayLevels'] = numpy.where(numpy.sum(self.P_glszm, axis=(0, 2))!=0)[0] + 1 # Start from grayscale 1, 0 is background
+    self.coefficients['Ng'] = int(numpy.max(self.coefficients['grayLevels']))  # max gray level in the ROI
+
+    # Delete rows that specify gray levels not present in the ROI
+    Ng = self.coefficients['Ng']
+    NgVector = range(1, Ng + 1)  # All possible gray values
+    GrayLevels = self.coefficients['grayLevels']  # Gray values present in ROI
+    emptyGrayLevels = numpy.array(list(set(NgVector) - set(GrayLevels)), dtype=int)  # Gray values NOT present in ROI
+
+    self.P_glszm = numpy.delete(self.P_glszm, emptyGrayLevels - 1, 1)
+
+    self.logger.debug('Calculating GLSZM coefficients')
+
+    ps = numpy.sum(self.P_glszm, 1)  # shape (Nvox, Ns)
+    pg = numpy.sum(self.P_glszm, 2)  # shape (Nvox, Ng)
+
+    ivector = self.coefficients['grayLevels'].astype(float)  # shape (Ng,)
+    jvector = numpy.arange(1, self.P_glszm.shape[2] + 1, dtype=numpy.float64)  # shape (Ns,)
+
+    # Get the number of zones in this GLSZM
+    Nz = numpy.sum(self.P_glszm, (1, 2))  # shape (Nvox,)
+    Nz[Nz == 0] = 1  # set sum to numpy.spacing(1) if sum is 0?
+
+    # Get the number of voxels represented by this GLSZM: Multiply the zones by their size and sum them
+    Np = numpy.sum(ps * jvector[None, :], 1)  # shape (Nvox, )
+    Np[Np == 0] = 1
+
+    # Delete columns that specify zone sizes not present in the ROI
+    emptyZoneSizes = numpy.where(numpy.sum(ps, 0) == 0)
+    self.P_glszm = numpy.delete(self.P_glszm, emptyZoneSizes, 2)
+    jvector = numpy.delete(jvector, emptyZoneSizes)
+    ps = numpy.delete(ps, emptyZoneSizes, 1)
+
+    self.coefficients['Np'] = Np
+    self.coefficients['Nz'] = Nz
+    self.coefficients['ps'] = ps
+    self.coefficients['pg'] = pg
+    self.coefficients['ivector'] = ivector
+    self.coefficients['jvector'] = jvector
