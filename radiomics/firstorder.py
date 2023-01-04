@@ -82,15 +82,17 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
                            [[-1, -3, -1], 
                             [-3, -6, -3], 
                             [-1, -3, -1]]]
-    dx = convolve(self.imageArray, numpy.transpose(matlab_sobel_kernel, axes=[1, 0, 2]), mode='nearest')
-    dy = convolve(self.imageArray, matlab_sobel_kernel, mode='nearest')
-    dz = convolve(self.imageArray, numpy.transpose(matlab_sobel_kernel, axes=[2, 1, 0]), mode='nearest')
 
-    # dx = sobel(self.imageArray, 0, mode='nearest')  # x derivative
-    # dy = sobel(self.imageArray, 1, mode='nearest')  # y derivative
-    # dz = sobel(self.imageArray, 2, mode='nearest')  # z derivative
-    self.gradientImageArray = numpy.sqrt(numpy.power(dx, 2) + numpy.power(dy, 2) + numpy.power(dz, 2)) / 44
-
+    if len(self.imageArray.shape) == 3:
+      dx = convolve(self.imageArray, numpy.transpose(matlab_sobel_kernel, axes=[1, 0, 2]), mode='nearest')
+      dy = convolve(self.imageArray, matlab_sobel_kernel, mode='nearest')
+      dz = convolve(self.imageArray, numpy.transpose(matlab_sobel_kernel, axes=[2, 1, 0]), mode='nearest')
+      self.gradientImageArray = numpy.sqrt(numpy.power(dx, 2) + numpy.power(dy, 2) + numpy.power(dz, 2)) / 44
+    else:
+      dx = sobel(self.imageArray, 0, mode='nearest')  # x derivative
+      dy = sobel(self.imageArray, 1, mode='nearest')  # y derivative
+      self.gradientImageArray = numpy.sqrt(numpy.power(dx, 2) + numpy.power(dy, 2)) / 8
+    
     if voxelCoordinates is None:
       self.targetVoxelArray = self.imageArray[self.maskArray].astype('float').reshape((1, -1))
       self.targetGradientVoxelArray = self.gradientImageArray[self.maskArray].astype('float').reshape((1, -1))
@@ -516,16 +518,16 @@ class RadiomicsFirstOrder(base.RadiomicsFeaturesBase):
 
     return numpy.nanstd(self.targetVoxelArray, axis=1, ddof=1)
 
-  def getModeSUVFeatureValue(self):
+  def getModeFeatureValue(self):
     return numpy.array([statistics.mode(numpy.round(self.targetVoxelArray.flatten(), 1))])
 
-  def getGeomeanSUVFeatureValue(self):
+  def getGeomeanFeatureValue(self):
     return gmean(self.targetVoxelArray, axis=1)
 
-  def getHarmmeanSUVFeatureValue(self):
+  def getHarmmeanFeatureValue(self):
     return numpy.array([statistics.harmonic_mean(self.targetVoxelArray.flatten())])
 
-  def getTrimmeanSUVFeatureValue(self):
+  def getTrimmeanFeatureValue(self):
     return trim_mean(self.targetVoxelArray, 0.05, axis=1)
 
   # def getIrregularityFeatureValue(self):
