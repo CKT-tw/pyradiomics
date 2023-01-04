@@ -109,8 +109,12 @@ def getBinEdges(parameterValues, **kwargs):
   binWidth = kwargs.get('binWidth', 25)
   binCount = kwargs.get('binCount')
   digitizedRange = kwargs.get('digitizedRange')
+  customBinEdges = kwargs.get('customBinEdges')
 
-  if binCount is not None:
+  if customBinEdges is not None:
+    binEdges = customBinEdges
+    binEdges[-1] = numpy.nextafter(binEdges[-1], +numpy.inf)  # Ensures that the maximum value is included in the topmost bin when using numpy.digitize
+  elif binCount is not None:
     binEdges = numpy.histogram(parameterValues, binCount, range=digitizedRange)[1]
     binEdges[-1] = numpy.nextafter(binEdges[-1], +numpy.inf)  # Ensures that the maximum value is included in the topmost bin when using numpy.digitize
   else:
