@@ -324,7 +324,7 @@ class RadiomicsNGTDMfromMatrix(RadiomicsNGTDM):
 
     # Coefficients in base.py: grayLevels, Ng
     self.coefficients['grayLevels'] = numpy.where(numpy.sum(self.P_ngtdm[:, :, 0], 0) != 0)[0] + 1 # Start from grayscale 1, 0 is background
-    self.coefficients['Ng'] = int(numpy.max(self.coefficients['grayLevels']))  # max gray level in the ROI
+    self.coefficients['Ng'] = self.P_ngtdm.shape[1]  # max gray level in the ROI
 
     # Delete empty grey levels
     emptyGrayLevels = numpy.where(numpy.sum(self.P_ngtdm[:, :, 0], 0) == 0)

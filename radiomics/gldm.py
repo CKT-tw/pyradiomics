@@ -451,7 +451,7 @@ class RadiomicsGLDMfromMatrix(RadiomicsGLDM):
 
     # Coefficients in base.py: grayLevels, Ng
     self.coefficients['grayLevels'] = numpy.where(numpy.sum(self.P_gldm, (0, 2)) != 0)[0] + 1 # Start from grayscale 1, 0 is background
-    self.coefficients['Ng'] = int(numpy.max(self.coefficients['grayLevels']))  # max gray level in the ROI
+    self.coefficients['Ng'] = self.P_gldm.shape[1]  # max gray level in the ROI
 
     # Delete rows that specify gray levels not present in the ROI
     Ng = self.coefficients['Ng']
